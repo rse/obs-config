@@ -34,7 +34,7 @@
     "dependencies" : {
         "yargs":                  "17.0.1",
         "chalk":                  "4.1.1",
-        "strip-ansi":             "7.0.0",
+        "strip-ansi":             "6.0.0",
         "js-yaml":                "4.1.0",
         "jszip":                  "3.6.0",
         "tmp":                    "0.2.1",
