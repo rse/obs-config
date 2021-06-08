@@ -1,0 +1,60 @@
+{
+    "name":                       "obs-config",
+    "homepage":                   "http://github.com/rse/obs-config",
+    "description":                "OBS Studio Configuration Manager",
+    "version":                    "0.9.0",
+    "license":                    "MIT",
+    "author": {
+        "name":                   "Dr. Ralf S. Engelschall",
+        "email":                  "rse@engelschall.com",
+        "url":                    "http://engelschall.com"
+    },
+    "keywords": [
+                                  "obs", "studio", "configuration", "media", "asset"
+    ],
+    "repository": {
+        "type":                   "git",
+        "url":                    "git://github.com/rse/obs-config.git"
+    },
+    "bugs": {
+        "url":                    "http://github.com/rse/obs-config/issues"
+    },
+    "bin": {
+        "obs-config":             "./obs-config.js"
+    },
+    "devDependencies": {
+        "eslint":                 "7.28.0",
+        "eslint-config-standard": "16.0.3",
+        "eslint-plugin-import":   "2.23.4",
+        "eslint-plugin-node":     "11.1.0",
+        "npm-run-all":            "4.1.5",
+        "pkg":                    "5.2.1",
+        "shx":                    "0.3.3"
+    },
+    "dependencies" : {
+        "yargs":                  "17.0.1",
+        "chalk":                  "4.1.1",
+        "strip-ansi":             "7.0.0",
+        "js-yaml":                "4.1.0",
+        "jszip":                  "3.6.0",
+        "tmp":                    "0.2.1",
+        "rimraf":                 "3.0.2",
+        "mkdirp":                 "1.0.4"
+    },
+    "engines": {
+        "node":                   ">=14.0.0"
+    },
+    "scripts": {
+        "prepublishOnly":         "npm-run-all -s lint",
+        "build":                  "npm-run-all -s lint package",
+        "clean":                  "npm-run-all -s package:clean",
+        "lint":                   "eslint --config eslint.yaml obs-config*.js",
+        "package":                "npm-run-all -s package:gen package:mv:lnx package:mv:win package:mv:mac",
+        "package:gen":            "pkg -t node14-linux-x64,node14-win-x64,node14-macos-x64 .",
+        "package:mv:lnx":         "shx mv obs-config-linux   obs-config-lnx-x64",
+        "package:mv:win":         "shx mv obs-config-win.exe obs-config-win-x64.exe",
+        "package:mv:mac":         "shx mv obs-config-macos   obs-config-mac-x64",
+        "package:clean":          "rm -f obs-config-lnx-x64 obs-config-win-x64.exe obs-config-mac-x64",
+        "test":                   "node obs-config.js -v2 locate"
+    }
+}
