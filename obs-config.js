@@ -23,6 +23,10 @@
 **  SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 */
 
+/*  internal requirements  */
+const os          = require("os")
+const path        = require("path")
+
 /*  external requirements  */
 const yargs       = require("yargs")
 const chalk       = require("chalk")
@@ -33,6 +37,15 @@ const stripAnsi   = require("strip-ansi")
 // const my          = require("./package.json")
 
 ;(async () => {
+    /*  determine default configuration directory  */
+    let configDir = ""
+    if (os.platform() === "win32")
+        configDir = path.join(process.env["APPDATA"], "obs-studio")
+    else if (os.platform() === "darwin")
+        configDir = path.join(process.env["HOME"], "Library", "Application Support", "obs-studio")
+    else if (os.platform() === "linux")
+        configDir = path.join(process.env["HOME"], ".config", "obs-studio")
+
     /*  parse command-line options  */
     const usage =
         "Usage: obs-config " +
@@ -63,7 +76,7 @@ const stripAnsi   = require("strip-ansi")
             alias:    "directory",
             type:     "string",
             describe: "OBS Studio configuration directory",
-            default:  ""
+            default:  configDir
         })
         .option("p", {
             alias:    "profile",
@@ -98,47 +111,42 @@ const stripAnsi   = require("strip-ansi")
         }
     }
 
+    /*  helper function for fatal error  */
+    const fatal = (msg) => {
+        process.stderr.write(`obs-studio: ${chalk.red("ERROR")}: ${msg}\n`)
+        process.exit(1)
+    }
+
+    /*  sanity check options  */
+    if (opts.directory === "")
+        fatal("no OBS Studio configuration directory configured")
+
     /*  dispatch commands  */
     const command = opts._[0]
     if (command === "locate") {
-        if (opts._.length !== 1) {
-            process.stderr.write("ERROR: invalid number of arguments\n")
-            process.stderr.write(`${usage}\n`)
-            process.exit(1)
-        }
+        if (opts._.length !== 1)
+            fatal("locate: invalid numnber of arguments to command")
         log(0, "locate")
     }
     else if (command === "consolidate") {
-        if (opts._.length !== 1) {
-            process.stderr.write("ERROR: invalid number of arguments\n")
-            process.stderr.write(`${usage}\n`)
-            process.exit(1)
-        }
+        if (opts._.length !== 1)
+            fatal("consolidate: invalid numnber of arguments to command")
         log(0, "consolidate")
     }
     else if (command === "relocate") {
-        if (opts._.length !== 1) {
-            process.stderr.write("ERROR: invalid number of arguments\n")
-            process.stderr.write(`${usage}\n`)
-            process.exit(1)
-        }
+        if (opts._.length !== 1)
+            fatal("relocate: invalid numnber of arguments to command")
         log(0, "relocate")
     }
     else if (command === "export") {
-        if (opts._.length !== 2) {
-            process.stderr.write("ERROR: invalid number of arguments\n")
-            process.stderr.write(`${usage}\n`)
-            process.exit(1)
-        }
+        if (opts._.length !== 2)
+            fatal("export: invalid numnber of arguments to command")
         const zipfile = opts._[1]
         log(0, `export: ${zipfile}`)
     }
     else if (command === "import") {
-        if (opts._.length !== 2) {
-            process.stderr.write("ERROR: invalid number of arguments\n")
-            process.stderr.write(`${usage}\n`)
-            process.exit(1)
-        }
+        if (opts._.length !== 2)
+            fatal("import: invalid numnber of arguments to command")
         const zipfile = opts._[1]
         log(0, `import: ${zipfile}`)
     }
