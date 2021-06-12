@@ -26,11 +26,14 @@
 /*  internal requirements  */
 const os          = require("os")
 const path        = require("path")
+const fs          = require("fs")
 
 /*  external requirements  */
 const yargs       = require("yargs")
 const chalk       = require("chalk")
 const stripAnsi   = require("strip-ansi")
+const glob        = require("glob-promise")
+const minimatch   = require("minimatch")
 // const jsYAML      = require("js-yaml")
 
 /*  own package information  */
@@ -51,12 +54,17 @@ const stripAnsi   = require("strip-ansi")
         "Usage: obs-config " +
         " [-v|--verbose <level>]" +
         " [-d|--directory <config-directory>]" +
-        " [-p|--profile <profile-pattern>[,...]]" +
-        " [-c|--collection <collection-pattern>[,...]]" +
+        " [-g|--global]" +
+        " [-p|--profile <pattern-list>[,...]]" +
+        " [-c|--collection <pattern-list>[,...]]" +
+        " [-a|--asset <pattern-list>[,...]]" +
         " <command> [...]\n" +
-        "Usage: obs-config [...] locate             # locate and display all external assets\n" +
+        "Usage: obs-config [...] locate             # locate and display all assets\n" +
+        "Usage: obs-config [...] resolve            # locate and resolve all assets\n" +
         "Usage: obs-config [...] consolidate        # locate and internalize external assets\n" +
-        "Usage: obs-config [...] relocate           # relocate all internal assets (after directory change)\n" +
+        "Usage: obs-config [...] abbreviate         # abbreviate all internal assets (before installation)\n" +
+        "Usage: obs-config [...] relocate           # relocate   all internal assets (after installation)\n" +
+        "Usage: obs-config [...] prune              # prune  configuration and internal assets\n" +
         "Usage: obs-config [...] export <zip-file>  # export configuration and internal assets\n" +
         "Usage: obs-config [...] import <zip-file>  # import configuration and internal assets"
     const opts = yargs()
@@ -72,22 +80,38 @@ const stripAnsi   = require("strip-ansi")
             nargs:    1,
             default:  0
         })
+        .option("g", {
+            alias:    "global",
+            type:     "boolean",
+            describe: "OBS Studio global settings",
+            default:  true
+        })
         .option("d", {
             alias:    "directory",
             type:     "string",
             describe: "OBS Studio configuration directory",
+            nargs:    1,
             default:  configDir
         })
         .option("p", {
             alias:    "profile",
             type:     "string",
             describe: "OBS Studio profile name pattern list",
+            nargs:    1,
             default:  "*"
         })
         .option("c", {
             alias:    "collection",
             type:     "string",
             describe: "OBS Studio scene collection name pattern list",
+            nargs:    1,
+            default:  "*"
+        })
+        .option("a", {
+            alias:    "asset",
+            type:     "string",
+            describe: "OBS Studio asset path pattern list",
+            nargs:    1,
             default:  "*"
         })
         .version(false)
@@ -104,7 +128,7 @@ const stripAnsi   = require("strip-ansi")
     const logLevels = [ "NONE", chalk.blue("INFO"), chalk.yellow("DEBUG") ]
     const log = (level, msg) => {
         if (level > 0 && level < logLevels.length && level <= opts.verbose) {
-            msg = `pptx-surgeon: ${chalk.blue(logLevels[level])}: ${msg}\n`
+            msg = `obs-config: ${chalk.blue(logLevels[level])}: ${msg}\n`
             if (opts.outputNocolor || !process.stderr.isTTY)
                 msg = stripAnsi(msg)
             process.stderr.write(msg)
@@ -121,41 +145,166 @@ const stripAnsi   = require("strip-ansi")
     if (opts.directory === "")
         fatal("no OBS Studio configuration directory configured")
 
+    /*  check whether element of a list should be taken  */
+    const shouldTakeElement = (element, filter) => {
+        let take = false
+        for (const f of filter.split(/(?<!\\),/)) {
+            let pattern = f
+            let m
+            let negate = false
+            if ((m = f.match(/^!(.+)$/)) !== null) {
+                negate = true
+                pattern = m[1]
+            }
+            if (minimatch(element, pattern, { dot: true })) {
+                if (!take && !negate)
+                    take = true
+                else if (take && negate)
+                    take = false
+            }
+        }
+        return take
+    }
+
+    /*  parse asset references  */
+    const parseAssets = (data, type) => {
+        const assets = []
+        const regexps = [
+            /"((?:file:(?:\/\/)?)?(?:[A-Za-z]:)?(?:\/(?:\\"|[^/"])+)+\/((?:\\"|[^/"])+))"/g,
+            /'((?:file:(?:\/\/)?)?(?:[A-Za-z]:)?(?:\/(?:\\'|[^/'])+)+\/((?:\\'|[^/'])+))'/g,
+            /"((?:file:(?:\\\\)?)?(?:[A-Za-z]:)?(?:\\(?:\\"|[^\"])+)+\\((?:\\"|[^\"])+))"/g,
+            /'((?:file:(?:\\\\)?)?(?:[A-Za-z]:)?(?:\\(?:\\'|[^\'])+)+\\((?:\\'|[^\'])+))'/g,
+        ]
+        for (regexp of regexps)
+            while ((m = regexp.exec(data)) !== null)
+                if (shouldTakeElement(m[1], opts.asset))
+                    assets.push({ ref: m[0], idx: m.index, path: m[1], file: m[2] })
+        return assets
+    }
+
+    /*  load configuration  */
+    const pathExists = (p) =>
+        fs.promises.access(p, fs.constants.F_OK).then(() => true).catch(() => false)
+    const loadConfig = async () => {
+        let config = []
+
+        /*  load global settings  */
+        if (opts.global) {
+            const file = path.join(opts.directory, "global.ini")
+            if (pathExists(file)) {
+                log(2, `load [GLOBAL]     "global.ini"`)
+                const data = await fs.promises.readFile(file, { encoding: "utf8" })
+                const assets = parseAssets(data, "ini")
+                config.push({
+                    type:   "global",
+                    path:   "global.ini",
+                    data:   data,
+                    assets: assets
+                })
+            }
+        }
+
+        /*  load profiles  */
+        if (opts.profile !== "") {
+            const profiles = await glob("*", { cwd: path.join(opts.directory, "basic", "profiles") })
+            for (const profile of profiles) {
+                if (shouldTakeElement(profile, opts.profile)) {
+                    const files = await glob("*.json", { cwd: path.join(opts.directory, "basic", "profiles", profile) })
+                    for (const file of files) {
+                        log(2, `load [PROFILE]    "basic/profiles/${profile}/${file}"`)
+                        const data = await fs.promises.readFile(path.join(opts.directory, "basic", "profiles", profile, file), { encoding: "utf8" })
+                        const assets = parseAssets(data, "json")
+                        config.push({
+                            type:   "profile",
+                            path:   `basic/profiles/${profile}/${file}`,
+                            data:   data,
+                            assets: assets
+                        })
+                    }
+                }
+            }
+        }
+
+        /*  load scene collections  */
+        if (opts.collection !== "") {
+            const collections = await glob("*.json", { cwd: path.join(opts.directory, "basic", "scenes") })
+            for (const file of collections) {
+                const collection = file.replace(/\.json$/, "")
+                if (shouldTakeElement(collection, opts.collection)) {
+                    log(2, `load [COLLECTION] "basic/scenes/${file}"`)
+                    const data = await fs.promises.readFile(path.join(opts.directory, "basic", "scenes", file), { encoding: "utf8" })
+                    const assets = parseAssets(data, "json")
+                    config.push({
+                        type:   "collection",
+                        path:   `basic/scenes/${file}`,
+                        data:   data,
+                        assets: assets
+                    })
+                }
+            }
+        }
+
+        return config
+    }
+
     /*  dispatch commands  */
     const command = opts._[0]
     if (command === "locate") {
         if (opts._.length !== 1)
             fatal("locate: invalid numnber of arguments to command")
-        log(0, "locate")
+        const config = await loadConfig()
+        for (const c of config) {
+            process.stdout.write(`[${c.type}] ${c.path}:\n`)
+            for (const asset of c.assets) {
+                process.stdout.write(`    [asset] ${asset.file} ${asset.path}\n`)
+            }
+        }
+    }
+    else if (command === "resolve") {
+        if (opts._.length !== 1)
+            fatal("resolve: invalid numnber of arguments to command")
+        log(1, "resolve")
     }
     else if (command === "consolidate") {
         if (opts._.length !== 1)
             fatal("consolidate: invalid numnber of arguments to command")
-        log(0, "consolidate")
+        log(1, "consolidate")
+    }
+    else if (command === "abbreviate") {
+        if (opts._.length !== 1)
+            fatal("abbreviate: invalid numnber of arguments to command")
+        log(1, "abbreviat")
     }
     else if (command === "relocate") {
         if (opts._.length !== 1)
             fatal("relocate: invalid numnber of arguments to command")
-        log(0, "relocate")
+        log(1, "relocate")
+    }
+    else if (command === "prune") {
+        if (opts._.length !== 1)
+            fatal("prune: invalid numnber of arguments to command")
+        log(1, "prune")
     }
     else if (command === "export") {
         if (opts._.length !== 2)
             fatal("export: invalid numnber of arguments to command")
         const zipfile = opts._[1]
-        log(0, `export: ${zipfile}`)
+        log(1, `export: ${zipfile}`)
     }
     else if (command === "import") {
         if (opts._.length !== 2)
             fatal("import: invalid numnber of arguments to command")
         const zipfile = opts._[1]
-        log(0, `import: ${zipfile}`)
+        log(1, `import: ${zipfile}`)
     }
+    else
+        fatal(`invalid command "${command}"`)
 
     /*  gracefully terminate  */
     process.exit(0)
 })().catch((err) => {
     /*  fatal error  */
-    process.stderr.write(`pptx-surgeon: ${chalk.red("ERROR:")} ${err.stack}\n`)
+    process.stderr.write(`obs-config: ${chalk.red("ERROR:")} ${err.stack}\n`)
     process.exit(1)
 })
 
