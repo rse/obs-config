@@ -112,7 +112,7 @@ const minimatch   = require("minimatch")
             type:     "string",
             describe: "OBS Studio asset path pattern list",
             nargs:    1,
-            default:  "*"
+            default:  "**"
         })
         .version(false)
         .help(true)
@@ -170,15 +170,34 @@ const minimatch   = require("minimatch")
     const parseAssets = (data, type) => {
         const assets = []
         const regexps = [
-            /"((?:file:(?:\/\/)?)?(?:[A-Za-z]:)?(?:\/(?:\\"|[^/"])+)+\/((?:\\"|[^/"])+))"/g,
-            /'((?:file:(?:\/\/)?)?(?:[A-Za-z]:)?(?:\/(?:\\'|[^/'])+)+\/((?:\\'|[^/'])+))'/g,
-            /"((?:file:(?:\\\\)?)?(?:[A-Za-z]:)?(?:\\(?:\\"|[^\"])+)+\\((?:\\"|[^\"])+))"/g,
-            /'((?:file:(?:\\\\)?)?(?:[A-Za-z]:)?(?:\\(?:\\'|[^\'])+)+\\((?:\\'|[^\'])+))'/g,
+            { re: /"((?:file:(?:\/\/)?)?(?:[A-Za-z]:)?(?:\/(?:\\"|[^/"])+)+\/((?:\\"|[^/"])+?)(\?[a-zA-Z][a-zA-Z0-9]*=.+)?)"/g, q: '"', s: "/"  },
+            { re: /'((?:file:(?:\/\/)?)?(?:[A-Za-z]:)?(?:\/(?:\\'|[^/'])+)+\/((?:\\'|[^/'])+?)(\?[a-zA-Z][a-zA-Z0-9]*=.+)?)'/g, q: "'", s: "/"  },
+            { re: /"((?:file:(?:\\\\)?)?(?:[A-Za-z]:)?(?:\\(?:\\"|[^\"])+)+\\((?:\\"|[^\"])+?)(\?[a-zA-Z][a-zA-Z0-9]*=.+)?)"/g, q: '"', s: "\\" },
+            { re: /'((?:file:(?:\\\\)?)?(?:[A-Za-z]:)?(?:\\(?:\\'|[^\'])+)+\\((?:\\'|[^\'])+?)(\?[a-zA-Z][a-zA-Z0-9]*=.+)?)'/g, q: "'", s: "\\" },
         ]
-        for (regexp of regexps)
-            while ((m = regexp.exec(data)) !== null)
-                if (shouldTakeElement(m[1], opts.asset))
-                    assets.push({ ref: m[0], idx: m.index, path: m[1], file: m[2] })
+        for (item of regexps) {
+            while ((m = item.re.exec(data)) !== null) {
+                if (shouldTakeElement(m[1], opts.asset)) {
+                    let path = m[1]
+                    if (type === "ini")
+                        path = path
+                            .replaceAll("\\\\\\\\", "\\")
+                            .replaceAll("\\" + item.s, item.s)
+                    else
+                        path = path
+                            .replaceAll("\\\\", "\\")
+                            .replaceAll("\\" + item.s, item.s)
+                    assets.push({
+                        ref:   m[0],
+                        idx:   m.index,
+                        text:  m[1],
+                        path:  path,
+                        file:  m[2],
+                        query: m[3]
+                    })
+                }
+            }
+        }
         return assets
     }
 
@@ -255,9 +274,8 @@ const minimatch   = require("minimatch")
         const config = await loadConfig()
         for (const c of config) {
             process.stdout.write(`[${c.type}] ${c.path}:\n`)
-            for (const asset of c.assets) {
+            for (const asset of c.assets)
                 process.stdout.write(`    [asset] ${asset.file} ${asset.path}\n`)
-            }
         }
     }
     else if (command === "resolve") {
